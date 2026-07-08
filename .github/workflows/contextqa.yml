@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CONTEXTQA_BASE_URL: https://accounts.contextqa.com
-      CONTEXTQA_PLAN_ID: 2
+      CONTEXTQA_PLAN_ID: 9
     steps:
       - name: Authenticate and trigger test plan
         run: |
