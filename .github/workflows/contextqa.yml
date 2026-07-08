@@ -1,0 +1,51 @@
+name: ContextQA Tests
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  run-contextqa-tests:
+    runs-on: ubuntu-latest
+    env:
+      CONTEXTQA_BASE_URL: https://accounts.contextqa.com
+      CONTEXTQA_PLAN_ID: 2
+    steps:
+      - name: Authenticate and trigger test plan
+        run: |
+          TOKEN=$(curl -s -X POST "${CONTEXTQA_BASE_URL}/api/v1/auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"${{ secrets.ContextQA_Username }}\",\"password\":\"${{ secrets.ContextQA_Pass }}\"}" \
+            | jq -r '.token')
+
+          TRIGGER_RESPONSE=$(curl -s -X GET "${CONTEXTQA_BASE_URL}/api/v1/testplans/${CONTEXTQA_PLAN_ID}/execute" \
+            -H "Authorization: Bearer ${TOKEN}")
+
+          EXECUTION_ID=$(echo "$TRIGGER_RESPONSE" | jq -r '.executionId')
+          echo "EXECUTION_ID=$EXECUTION_ID" >> $GITHUB_ENV
+          echo "TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "Started execution: $EXECUTION_ID"
+
+      - name: Poll for completion
+        run: |
+          STATUS="RUNNING"
+          ATTEMPT=0
+          MAX_ATTEMPTS=60
+          while [ "$STATUS" = "RUNNING" ] || [ "$STATUS" = "PENDING" ]; do
+            if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
+              echo "Timed out waiting for ContextQA execution."
+              exit 1
+            fi
+            sleep 30
+            ATTEMPT=$((ATTEMPT + 1))
+            STATUS_RESPONSE=$(curl -s -X GET "${CONTEXTQA_BASE_URL}/api/v1/executions/${EXECUTION_ID}/status" \
+              -H "Authorization: Bearer ${TOKEN}")
+            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status')
+            echo "Status: $STATUS"
+          done
+
+          if [ "$STATUS" = "FAILED" ]; then
+            echo "ContextQA tests failed."
+            exit 1
+          fi
+          echo "ContextQA tests passed."
