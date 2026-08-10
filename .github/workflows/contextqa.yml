@@ -1,51 +1,47 @@
-name: ContextQA Tests
-
+name: Run ContextQA Test Plan
 on:
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  run-contextqa-tests:
+  test:
+    name: ContextQA Test Plan
     runs-on: ubuntu-latest
-    env:
-      CONTEXTQA_BASE_URL: https://accounts.contextqa.com
-      CONTEXTQA_PLAN_ID: 9
     steps:
-      - name: Authenticate and trigger test plan
+      - name: Install ContextQA MCP client
         run: |
-          TOKEN=$(curl -s -X POST "${CONTEXTQA_BASE_URL}/api/v1/auth/login" \
-            -H "Content-Type: application/json" \
-            -d "{\"username\":\"${{ secrets.ContextQA_Username }}\",\"password\":\"${{ secrets.ContextQA_Pass }}\"}" \
-            | jq -r '.token')
+          pip install uv
+          git clone https://github.com/indivatools/cqa-mcp.git /tmp/cqa-mcp
+          cd /tmp/cqa-mcp && uv sync
 
-          TRIGGER_RESPONSE=$(curl -s -X GET "${CONTEXTQA_BASE_URL}/api/v1/testplans/${CONTEXTQA_PLAN_ID}/execute" \
-            -H "Authorization: Bearer ${TOKEN}")
-
-          EXECUTION_ID=$(echo "$TRIGGER_RESPONSE" | jq -r '.executionId')
-          echo "EXECUTION_ID=$EXECUTION_ID" >> $GITHUB_ENV
-          echo "TOKEN=$TOKEN" >> $GITHUB_ENV
-          echo "Started execution: $EXECUTION_ID"
-
-      - name: Poll for completion
+      - name: Execute plan and gate on result
+        env:
+          CONTEXTQA_USERNAME: ${{ secrets.CONTEXTQA_USERNAME }}
+          CONTEXTQA_PASSWORD: ${{ secrets.CONTEXTQA_PASS }}
         run: |
-          STATUS="RUNNING"
-          ATTEMPT=0
-          MAX_ATTEMPTS=60
-          while [ "$STATUS" = "RUNNING" ] || [ "$STATUS" = "PENDING" ]; do
-            if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
-              echo "Timed out waiting for ContextQA execution."
-              exit 1
-            fi
-            sleep 30
-            ATTEMPT=$((ATTEMPT + 1))
-            STATUS_RESPONSE=$(curl -s -X GET "${CONTEXTQA_BASE_URL}/api/v1/executions/${EXECUTION_ID}/status" \
-              -H "Authorization: Bearer ${TOKEN}")
-            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status')
-            echo "Status: $STATUS"
-          done
+          cd /tmp/cqa-mcp
+          uv run python -c "
+          import os, sys, time
+          sys.path.insert(0, '.')
+          from app.contextqa_client import ContextQAClient
 
-          if [ "$STATUS" = "FAILED" ]; then
-            echo "ContextQA tests failed."
-            exit 1
-          fi
-          echo "ContextQA tests passed."
+          client = ContextQAClient(
+              username=os.environ['CONTEXTQA_USERNAME'],
+              password=os.environ['CONTEXTQA_PASSWORD'])
+
+          run = client.execute_test_plan(test_plan_id=${{ vars.CONTEXTQA_PLAN_ID }})
+          execution_id = run['id'] if 'id' in run else run['saveTestPlanResult'][0]['id']
+          print(f'Execution started: {execution_id}')
+
+          for attempt in range(60):
+              time.sleep(30)
+              s = client.get_test_plan_execution_status(execution_id=execution_id)
+              status = s.get('status')
+              print(f\"Attempt {attempt+1}: status={status} passed={s.get('passedCount')} failed={s.get('failedCount')} total={s.get('totalCount')}\")
+              if status != 'STATUS_IN_PROGRESS':
+                  ok = s.get('failedCount', 1) == 0 and s.get('abortedCount', 1) == 0 and s.get('totalCount', 0) > 0
+                  print('PASSED' if ok else 'FAILED')
+                  sys.exit(0 if ok else 1)
+
+          print('Timeout: did not complete in 30 minutes.')
+          sys.exit(1)
+          "
