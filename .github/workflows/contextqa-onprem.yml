@@ -1,12 +1,21 @@
 name: ContextQA onprem
 on:
   workflow_dispatch:
+    inputs:
+      plan-id: {default: "137"}
+      timeout: {default: "3600"}
+      api-url: {default: "https://api.onprem-aws-01.contextqa.info"}
+      secret: {default: "CONTEXTQA_TOKEN"}
 jobs:
   contextqa:
     runs-on: ubuntu-latest
     steps:
-      - uses: indivatools/contextqa-ci@v1
+      - id: cqa
+        uses: indivatools/contextqa-ci@v1
         with:
-          plan-id: 137
-          token: ${{ secrets.CONTEXTQA_TOKEN }}
-          api-url: https://api.onprem-aws-01.contextqa.info
+          plan-id: ${{ inputs.plan-id }}
+          timeout: ${{ inputs.timeout }}
+          api-url: ${{ inputs.api-url }}
+          token: ${{ secrets[inputs.secret] }}
+      - if: always()
+        run: echo "run-id=${{ steps.cqa.outputs.run-id }} result=${{ steps.cqa.outputs.result }} passed=${{ steps.cqa.outputs.passed-count }} failed=${{ steps.cqa.outputs.failed-count }} report=${{ steps.cqa.outputs.report-url }}"
