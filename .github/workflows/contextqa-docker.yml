@@ -1,0 +1,16 @@
+name: ContextQA docker CLI
+on: workflow_dispatch
+jobs:
+  cli:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run plan via container CLI
+        env:
+          CONTEXTQA_TOKEN: ${{ secrets.CONTEXTQA_TOKEN }}
+        run: |
+          set +e
+          docker run --rm -e CONTEXTQA_TOKEN -v "$PWD:/work" -w /work \
+            ghcr.io/indivatools/contextqa-cli:1 run-plan --plan-id 137 \
+            --api-url https://api.onprem-aws-01.contextqa.info --junit reports/contextqa.xml
+          echo "exit=$?"
+          ls -la reports && cat reports/contextqa.xml
